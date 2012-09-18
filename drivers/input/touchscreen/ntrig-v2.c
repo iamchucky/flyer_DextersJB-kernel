@@ -1473,10 +1473,17 @@ void ntrig_send_multi_touch_to_android(struct input_dev *input,
 {
 	int i = 0, index;
 	int fingers_num = multi_touch->FingerCount;
+	static int old_x = 0;
+	static int old_y = 0;
+	int sendsomething;
+	int allremoved;
 	NtrTrackedFinger *fingers = multi_touch->Fingers;
 
 	if (!input)
 		return;
+
+	allremoved = 1;
+	sendsomething = 0;
 
 	for (i = 0; i < fingers_num; i++) {
 		index = get_finger_index(fingers[i].TrackID);
@@ -1491,12 +1498,20 @@ void ntrig_send_multi_touch_to_android(struct input_dev *input,
 
 
 		} else {
+			allremoved = 0;
+			if (fingers[i].posX == old_x && fingers[i].posY == old_y)
+				continue;
+			
+			old_x = fingers[i].posX;
+			old_y = fingers[i].posY;
+			sendsomething = 1;
+
 			if (TSLog & Dbg_L5) {
 				pr_info("NTRIG #finger%d,[Id:%d][X:Y][%#x,%#x][dX:dY][%d,%d][Palm:%d][Removed:%d]htc:dzdw=%#x, posi=%x\n",
 					i+1, fingers[i].TrackID, fingers[i].posX, (int)fingers[i].posY,
 					(int)fingers[i].posDx, fingers[i].posDy,
 					(int)fingers[i].IsPalm, (int)fingers[i].IsRemoved,
-					(0x28 << 16) | ((fingers[i].posDx + fingers[i].posDy)/60),
+					(0x28 << 16) | ((fingers[i].posDx + fingers[i].posDy)/30),
 					(fingers[i].posX << 16 | fingers[i].posY));
 			}
 			ntg_orientate(orien, &fingers[i].posX, &fingers[i].posY);
@@ -1508,7 +1523,7 @@ void ntrig_send_multi_touch_to_android(struct input_dev *input,
 				compatible_tp_report(input, (void *)&fingers[i], index, true, 1);
 			} else {
 				input_report_abs(input, ABS_MT_TRACKING_ID, index);
-				input_report_abs(input, ABS_MT_AMPLITUDE, 0x28 << 16 | ((fingers[i].posDx+fingers[i].posDy)/75));
+				input_report_abs(input, ABS_MT_AMPLITUDE, 0x28 << 16 | ((fingers[i].posDx+fingers[i].posDy)/30));
 				if (i < fingers_num - 1)
 					input_report_abs(input, ABS_MT_POSITION, (fingers[i].posX << 16) | (fingers[i].posY));
 				else
@@ -1517,7 +1532,14 @@ void ntrig_send_multi_touch_to_android(struct input_dev *input,
 		}
 	}
 	if (event_google_enable == 1)
-		input_sync(input);
+	{
+		if (allremoved) {
+			input_mt_sync(input);
+			input_sync(input);
+		} else if (sendsomething) {
+			input_sync(input);
+		}
+	}
 	else {
 		if (((1 == fingers_num) && (fingers[0].IsRemoved)) || (0 == fingers_num)) {
 			if (event_google_enable == 1) {
